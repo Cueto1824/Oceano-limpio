@@ -2,13 +2,28 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#021526">
+<!-- Para que en iPhone/Android se pueda "Agregar a pantalla de inicio" y se abra a pantalla completa -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Océano Limpio">
 <title>Océano Limpio</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; background: #021526; font-family: 'Segoe UI', system-ui, sans-serif; color: #fff; overflow: hidden; }
-  #wrap { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; }
-  #stage { position: relative; aspect-ratio: 16 / 10; width: min(100vw, 160vh); }
+  /* dvh = alto REAL visible (en Safari de iPhone 100vh incluye lo que tapan sus barras y el juego se cortaba) */
+  #wrap {
+    width: 100vw; height: 100vh; height: 100dvh; display: flex; align-items: center; justify-content: center;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  #stage {
+    position: relative; aspect-ratio: 16 / 10;
+    width: min(100vw, 160vh);
+    width: min(calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right)),
+               calc((100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) * 1.6));
+  }
   canvas#game { display: block; width: 100%; height: 100%; border-radius: 12px; box-shadow: 0 0 40px rgba(0,180,255,.25); touch-action: none; }
   .overlay {
     position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -130,15 +145,38 @@
     position: absolute; right: 12px; bottom: 12px; z-index: 3; width: 44px; height: 44px; padding: 0; border-radius: 50%;
     font-size: 20px; line-height: 44px; background: rgba(0,30,60,.6); color: #fff; box-shadow: none; border: 2px solid rgba(127,227,255,.4);
   }
-  #muteBtn:hover { transform: none; background: rgba(0,50,90,.75); }
+  #muteBtn:hover, #fsBtn:hover { transform: none; background: rgba(0,50,90,.75); }
+  #fsBtn {
+    position: absolute; right: 64px; bottom: 12px; z-index: 3; width: 44px; height: 44px; padding: 0; border-radius: 50%;
+    font-size: 22px; line-height: 40px; background: rgba(0,30,60,.6); color: #fff; box-shadow: none; border: 2px solid rgba(127,227,255,.4);
+  }
+  .tip { font-size: clamp(10px, 1.3vw, 13px); color: #ffd166; }
   @media (orientation: portrait) and (max-width: 820px) {
     #rotate { display: block; position: fixed; top: 0; left: 0; right: 0; z-index: 5; text-align: center; padding: 10px 16px; background: #ffd166; color: #04253f; font-weight: 800; font-size: 14px; }
     #wrap { align-items: flex-start; padding-top: 44px; }
   }
   @media (max-height: 520px) {   /* celular en horizontal: tarjetas compactas para que se vean los botones */
     .card .desc, .card .bar { display: none; }
+    #selectScreen .hint { display: none; }
+    #muteBtn, #fsBtn { width: 34px; height: 34px; font-size: 16px; line-height: 30px; }
+    #muteBtn { right: 6px; bottom: 6px; }
+    #fsBtn { right: 46px; bottom: 6px; }
+    body:not(.ingame) #muteBtn, body:not(.ingame) #fsBtn { top: 6px; bottom: auto; }   /* fuera de la partida, arriba */
+    .card { padding: 5px; gap: 2px; }
+    .card canvas { max-height: 52px; object-fit: cover; }
+    .card .name { font-size: 13px; } .card .perk { font-size: 10px; }
+    #selectScreen input { padding: 5px 10px; font-size: 15px; }
+    #selectScreen .tip { font-size: 10px; }
+    #selectScreen button:not(#muteBtn):not(#fsBtn) { padding: 7px 26px; font-size: 16px; }
     .overlay { gap: 8px; padding: 10px; }
     h2 { font-size: 22px; }
+  }
+  @media (max-height: 380px) {   /* celulares muy bajos (Safari con sus barras): aún más compacto */
+    #selectScreen h2 { font-size: 18px; }
+    .card .perk { display: none; }
+    .card .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+    #selectScreen .tip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+    .fields label { font-size: 11px; gap: 2px; }
   }
   @media (max-width: 700px) {
     .host-lobby { grid-template-columns: 1fr; }
@@ -182,6 +220,7 @@
     <!-- Selección de personaje (práctica y para unirse a una sala) -->
     <div id="selectScreen" class="overlay hidden">
       <h2 id="selectTitle">Elige tu personaje</h2>
+      <div class="tip hidden" id="iosTip">📱 En iPhone: Compartir → «Agregar a pantalla de inicio» y ábrelo desde ahí para jugar a pantalla completa</div>
       <div id="joinFields" class="fields hidden">
         <label>Tu nombre <input id="nameInput" maxlength="16" autocomplete="off" placeholder="Ej: Juan"></label>
         <label>Código de sala <input id="codeInput" maxlength="5" autocomplete="off" placeholder="ABCDE"></label>
@@ -285,6 +324,7 @@
 
     <div id="countdown" class="hidden"></div>
     <button id="muteBtn" title="Silenciar (M)" aria-label="Silenciar o activar el sonido">🔊</button>
+    <button id="fsBtn" class="hidden" title="Pantalla completa" aria-label="Pantalla completa">⛶</button>
   </div>
 </div>
 
@@ -946,6 +986,24 @@ $('copyBtn').addEventListener('click', () => {
   else { inp.select(); try { document.execCommand('copy'); done(); } catch (e) {} }
 });
 $('codeInput').addEventListener('input', e => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); });
+/* Pantalla completa (Android y computador; el iPhone no lo permite, ahí sale un consejo) */
+const fsEl = document.documentElement;
+const fsSupported = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+const isFs = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+if (fsSupported && IS_TOUCH) $('fsBtn').classList.remove('hidden');
+$('fsBtn').addEventListener('click', e => {
+  e.stopPropagation(); e.currentTarget.blur();
+  if (isFs()) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+  const req = fsEl.requestFullscreen || fsEl.webkitRequestFullscreen;
+  Promise.resolve(req.call(fsEl)).then(() => {
+    if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {});
+  }).catch(() => {});
+});
+['fullscreenchange', 'webkitfullscreenchange'].forEach(ev => document.addEventListener(ev, () => { $('fsBtn').textContent = isFs() ? '🗗' : '⛶'; }));
+const isIOS = /iPhone|iPod/.test(navigator.userAgent);
+const standalone = window.navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+if (isIOS && !standalone) $('iosTip').classList.remove('hidden');
+
 $('muteBtn').addEventListener('click', e => { e.stopPropagation(); SFX.ensure(); SFX.setMuted(!SFX.isMuted()); e.currentTarget.blur(); });
 SFX.setMuted(SFX.isMuted());   // muestra el icono correcto al cargar
 $('bestStart').textContent = best ? `Tu mejor puntuación en práctica: ${best}` : '';
@@ -1056,7 +1114,8 @@ function update(dt) {
   const cap = char.speed * (joy.active && len > 0 ? force : 1);
   if (sp > cap) { player.vx *= cap / sp; player.vy *= cap / sp; }
   player.x += player.vx * dt; player.y += player.vy * dt;
-  const mx = 40, minY = SURFACE + 22, maxY = SEABED - 18;
+  // Márgenes para que el personaje (con aletas, cola o red) nunca se corte en los bordes ni se salga del agua
+  const mx = 54, minY = SURFACE + 34, maxY = SEABED - 22;
   if (player.x < mx) { player.x = mx; player.vx = 0; }
   if (player.x > W - mx) { player.x = W - mx; player.vx = 0; }
   if (player.y < minY) { player.y = minY; player.vy = 0; }
@@ -2387,6 +2446,8 @@ function frame(now) {
   const dt = Math.min(0.033, (now - last) / 1000);
   last = now;
   if (state !== 'paused') { elapsed += dt; updateAmbient(dt); }
+  const ingame = state === 'playing' || state === 'countdown' || state === 'paused';
+  if (document.body.classList.contains('ingame') !== ingame) document.body.classList.toggle('ingame', ingame);
   if (state === 'countdown') tickCountdown();
   if (state === 'playing') update(dt);
   if (NET.role === 'host') hostTick();
