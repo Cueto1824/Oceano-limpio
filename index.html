@@ -431,10 +431,41 @@ const SFX = (() => {
   let musicWanted = false, musicTimer = null, nextTime = 0, step = 0;
   try { muted = localStorage.getItem('oceanoLimpioMute') === '1'; } catch (e) {}
 
+  /* --- Desbloqueo del audio en celulares (sobre todo iPhone) ---
+     1) navigator.audioSession 'playback': el sonido se oye aunque el interruptor de silencio esté activado (iOS 17+).
+     2) Un <audio> en bucle con silencio: hace lo mismo en iPhones más antiguos.
+     3) Un sonido vacío dentro del toque del jugador: "despierta" el motor de audio. */
+  let unlocked = false, silentEl = null;
+  function silentWavURL() {
+    const n = 4000, buf = new ArrayBuffer(44 + n), v = new DataView(buf);
+    const w = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
+    w(0, 'RIFF'); v.setUint32(4, 36 + n, true); w(8, 'WAVE'); w(12, 'fmt ');
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+    w(36, 'data'); v.setUint32(40, n, true);
+    for (let i = 0; i < n; i++) v.setUint8(44 + i, 128);
+    return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  }
+  function unlock() {
+    if (!ac || unlocked || document.hidden) return;
+    try {
+      if (!silentEl) {
+        silentEl = document.createElement('audio');
+        silentEl.src = silentWavURL(); silentEl.loop = true;
+        silentEl.setAttribute('playsinline', ''); silentEl.setAttribute('webkit-playsinline', '');
+      }
+      if (silentEl.paused) { const pr = silentEl.play(); if (pr) pr.catch(() => {}); }
+    } catch (e) {}
+    try { const b = ac.createBuffer(1, 1, 22050), src = ac.createBufferSource(); src.buffer = b; src.connect(ac.destination); src.start(0); } catch (e) {}
+    const done = () => { if (ac.state === 'running' && silentEl && !silentEl.paused) unlocked = true; };
+    if (ac.state !== 'running') ac.resume().then(done, () => {}); else setTimeout(done, 100);
+  }
+
   function ensure() {
     if (!ac) {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return null;
+      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
       ac = new AC();
       master = ac.createGain(); master.gain.value = muted ? 0 : 1; master.connect(ac.destination);
       sfxBus = ac.createGain(); sfxBus.gain.value = SFX_VOLUME; sfxBus.connect(master);
@@ -442,10 +473,15 @@ const SFX = (() => {
       noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
       const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     }
-    if (ac.state === 'suspended' && !document.hidden) ac.resume().catch(() => {});
+    if (!unlocked) unlock();
+    else if (ac.state !== 'running' && !document.hidden) ac.resume().catch(() => {});   // 'suspended' o 'interrupted' (llamada, etc.)
     return ac;
   }
-  const ready = () => ac && ac.state === 'running' && !muted;
+  const ready = () => {
+    if (!ac || muted) return false;
+    if (ac.state !== 'running') { if (!document.hidden) ac.resume().catch(() => {}); return false; }
+    return true;
+  };
 
   // Nota simple con envolvente (ataque rápido, caída exponencial) y deslizamiento opcional
   function tone(f, t0, dur, type = 'sine', vol = .3, dest = sfxBus, slideTo = null, attack = .006) {
@@ -575,10 +611,16 @@ const SFX = (() => {
   }
 
   // El navegador solo deja sonar el audio después de que el jugador toque o pulse algo
-  ['pointerdown', 'keydown', 'touchend'].forEach(ev => window.addEventListener(ev, ensure, { passive: true }));
+  // iPhone solo deja arrancar el sonido dentro de un toque real: escuchamos todos los tipos de toque
+  ['touchstart', 'touchend', 'pointerdown', 'pointerup', 'click', 'keydown']
+    .forEach(ev => window.addEventListener(ev, ensure, { passive: true, capture: true }));
   document.addEventListener('visibilitychange', () => {
     if (!ac) return;
-    if (document.hidden) ac.suspend().catch(() => {}); else ac.resume().catch(() => {});
+    if (document.hidden) {
+      ac.suspend().catch(() => {});
+      if (silentEl) silentEl.pause();
+      unlocked = false;                 // al volver, el siguiente toque lo reactiva todo
+    } else ac.resume().catch(() => {});
   });
 
   return Object.assign(fx, { music, setMuted, isMuted: () => muted, ensure });
